@@ -2,6 +2,8 @@ var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
 var bodyParser = require('body-parser');
+var bcrypt = require('bcrypt-nodejs');
+var cookieParser = require('cookie-parser');
 
 
 var db = require('./app/config');
@@ -23,14 +25,17 @@ app.use(bodyParser.json());
 // Parse forms (signup/login)
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(__dirname + '/public'));
+var store = new session.MemoryStore;
+app.use(cookieParser('meow'));
 app.use(session({
-  secret: 'MEOW'
+  secret: 'meow',
+  store: store,
+  resave: false
 }));
 
-
+// (req.session.cookie['_expires'] > Date.now())
 var restrict = function(req, res){
-  if(!req.session.user){
-    console.log('error no session user');
+  if((!req.session.loggedIn)){
     res.redirect('/login');
   }
 }
@@ -38,19 +43,18 @@ var restrict = function(req, res){
 app.get('/',
 function(req, res) {
   restrict(req, res);
-  // console.log('session!!!!', req.session.user);
   res.render('index');
 });
 
 app.get('/create',
 function(req, res) {
-  // restrict(req, res);
+  restrict(req, res);
   res.render('index');
 });
 
 app.get('/links',
 function(req, res) {
-  // restrict(req, res);
+  restrict(req, res);
   Links.reset().fetch().then(function(links) {
     res.send(200, links.models);
   });
@@ -101,19 +105,27 @@ app.get('/signup', function(req, res){
 });
 
 app.post('/signup', function(req, res){
-  // console.log('request.body: ', req.body);
-  var userCredentials = req.body;
+  var credentials = req.body;
 
-new User({username: userCredentials.username})
+new User({username: credentials.username})
   .fetch().then(function(found){
     if (found){
       res.redirect('/login');
     } else {
-      var user = new User({username: userCredentials.username, password: userCredentials.password});
-      user.save().then(function(newUser){
-        Users.add(newUser);
-        res.redirect('/login');;
-      });
+      bcrypt.genSalt  (10, function(err, salt){
+        bcrypt.hash(credentials.password, salt, null,
+        function(err, encrypt){
+          var user = new User({
+            username: credentials.username,
+            password: encrypt,
+            salt: salt
+          });
+          user.save().then(function(newUser){
+            Users.add(newUser);
+            res.redirect('/login');;
+          });
+        })
+      })
     }
   });
 });
@@ -124,19 +136,24 @@ app.get('/login', function(req, res){
 });
 
 app.post('/login', function(req, res){
-  // console.log('request.body: ', req.body);
-  var userCredentials = req.body;
-  new User({username: userCredentials.username})
+  var credentials = req.body;
+  new User({username: credentials.username})
     .fetch().then(function(found){
       if(found){
-        console.log('found.get: ', found.get('password'));
+        bcrypt.compare(credentials.password, found.get('password'), function(err, result){
+          if(result){
+
+            req.session.loggedIn = true;
+
+            res.redirect('/')
+          }
+          else{
+            //redirect to login
+            console.log('not found');
+          }
+        })
       }
     })
-
-  //if userCredentials is in 'users' table
-    //issue session token
-  //else redirect to signup page
-
 
 });
 /************************************************************/
